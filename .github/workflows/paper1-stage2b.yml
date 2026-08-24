@@ -1,0 +1,52 @@
+name: Paper1 Stage2B Harmonization
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage2b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::readxl
+            any::haven
+            any::dplyr
+            any::purrr
+            any::stringr
+            any::tidyr
+            any::janitor
+
+      - name: Run Stage 2B
+        run: Rscript R/run_stage2b.R
+
+      - name: Show summary
+        if: always()
+        run: |
+          echo "===== STAGE 2B SUMMARY ====="
+          cat outputs/stage2b_harmonization/STAGE2B_SUMMARY.md || true
+          echo "===== DECISION TABLE ====="
+          cat outputs/stage2b_harmonization/10_stage2b_decision_table.csv || true
+
+      - name: Upload Stage 2B artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage2b-harmonization
+          path: outputs/stage2b_harmonization/
+          if-no-files-found: warn
+          retention-days: 30
