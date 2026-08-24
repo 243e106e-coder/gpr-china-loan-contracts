@@ -426,9 +426,7 @@ for (tbl_name in score_table$table) {
       na.rm = TRUE
     )
 
-    table_match_summary[
-      [length(table_match_summary) + 1]
-    ] <- tibble(
+    table_match_summary[[length(table_match_summary) + 1]] <- tibble(
       table = tbl_name,
       id_column = id_col,
       matched_contracts = matched_n,
