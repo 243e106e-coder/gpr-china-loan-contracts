@@ -1,0 +1,52 @@
+name: Paper1 Stage1 Data Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage1-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::readxl
+            any::haven
+            any::dplyr
+            any::purrr
+            any::stringr
+            any::tidyr
+            any::janitor
+
+      - name: Run Stage 1 audit
+        run: Rscript R/run_stage1.R
+
+      - name: Show key outputs
+        if: always()
+        run: |
+          echo "===== download_status.csv ====="
+          cat outputs/stage1_audit/download_status.csv || true
+          echo "===== STAGE1_SUMMARY.md ====="
+          cat outputs/stage1_audit/STAGE1_SUMMARY.md || true
+
+      - name: Upload Stage 1 audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage1-audit
+          path: outputs/stage1_audit/
+          if-no-files-found: warn
+          retention-days: 30
