@@ -1,0 +1,56 @@
+name: Paper1 Stage2A Pricing Recovery
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage2a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::readxl
+            any::haven
+            any::dplyr
+            any::purrr
+            any::stringr
+            any::tidyr
+            any::janitor
+
+      - name: Run Stage 2A
+        run: Rscript R/run_stage2a.R
+
+      - name: Show Stage 2A summary
+        if: always()
+        run: |
+          echo "===== STAGE 2A SUMMARY ====="
+          cat outputs/stage2a_pricing_recovery/STAGE2A_SUMMARY.md || true
+          echo "===== MATCH SUMMARY ====="
+          head -n 20 outputs/stage2a_pricing_recovery/06_record_id_match_summary.csv || true
+          echo "===== PRICING COVERAGE ====="
+          cat outputs/stage2a_pricing_recovery/09_pricing_recovery_coverage.csv || true
+          echo "===== BASELINE SAMPLE COUNTS ====="
+          cat outputs/stage2a_pricing_recovery/12_baseline_sample_counts.csv || true
+
+      - name: Upload Stage 2A artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage2a-pricing-recovery
+          path: outputs/stage2a_pricing_recovery/
+          if-no-files-found: warn
+          retention-days: 30
