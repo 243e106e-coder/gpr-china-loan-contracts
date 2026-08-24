@@ -65,14 +65,18 @@ readme <- readxl::read_excel(
   col_names = FALSE
 )
 
+# ReadMe columns have mixed Excel types (character/numeric/logical).
+# Convert every source column to character BEFORE pivot_longer() so vctrs
+# does not try to combine incompatible column types.
 readme_long <- readme %>%
+  mutate(across(everything(), ~ as.character(.x))) %>%
   mutate(readme_row = row_number()) %>%
   pivot_longer(
     cols = -readme_row,
     names_to = "readme_col",
-    values_to = "text"
+    values_to = "text",
+    values_transform = list(text = as.character)
   ) %>%
-  mutate(text = as.character(text)) %>%
   filter(!is.na(text), str_trim(text) != "")
 
 pricing_terms <- c(
