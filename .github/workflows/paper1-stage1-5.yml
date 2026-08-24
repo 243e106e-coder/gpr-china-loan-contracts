@@ -1,0 +1,54 @@
+name: Paper1 Stage1.5 Pricing Recovery Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pricing-recovery-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::readxl
+            any::dplyr
+            any::tidyr
+            any::stringr
+            any::purrr
+            any::janitor
+            any::haven
+
+      - name: Run Stage 1.5
+        run: Rscript R/run_stage1_5.R
+
+      - name: Show Stage 1.5 summary
+        if: always()
+        run: |
+          echo "===== STAGE 1.5 SUMMARY ====="
+          cat outputs/stage1_5_pricing_recovery/STAGE1_5_SUMMARY.md || true
+          echo "===== PRICING COLUMN HITS ====="
+          cat outputs/stage1_5_pricing_recovery/04_pricing_column_hits.csv || true
+          echo "===== LEGAL VARIATION ====="
+          cat outputs/stage1_5_pricing_recovery/06_legal_variable_variation_summary.csv || true
+
+      - name: Upload Stage 1.5 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage1-5-pricing-recovery
+          path: outputs/stage1_5_pricing_recovery/
+          if-no-files-found: warn
+          retention-days: 30
