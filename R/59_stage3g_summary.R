@@ -11,7 +11,7 @@ final <- read_csv(
 )
 
 lines <- c(
-  "# Paper 1 — Stage 3G Final Inference",
+  "# Paper 1 — Stage 3G Final Inference (Wild-Cluster Updated)",
   "",
   "## Final targeted results",
   paste0(
@@ -21,18 +21,22 @@ lines <- c(
     ", clustered p=",round(final$p.value,4),
     ", Holm=",round(final$p_holm_all,4),
     ", BH=",round(final$p_bh_all,4),
-    ", wild=",
-    ifelse(is.na(final$p_value_wild_cluster),"NA",round(final$p_value_wild_cluster,4)),
+    ", wild-status=",final$wild_status,
+    ", wild-p=",
+    ifelse(
+      is.na(final$p_value_wild_cluster),
+      "NA",
+      round(final$p_value_wild_cluster,4)
+    ),
     ", LOO-country sign=",round(final$loo_country_sign_share,3),
     ", LOO-year sign=",round(final$loo_year_sign_share,3),
     ", strength=",final$final_strength
   ),
   "",
-  "## Interpretation",
-  "- F1/F2 are the financial core: pricing and maturity.",
-  "- L2/L3/L4 are the legal validation block retained from Stage 3F.",
-  "- No new outcome is searched in Stage 3G.",
-  "- Results are still observational and should not be described as causal without an additional identification design."
+  "## Inference rules",
+  "- Wild-cluster bootstrap uses borrower-country clusters, 9,999 Rademacher draws, and imposes the null.",
+  "- The bootstrap is a small-cluster inference check; it does not create causal identification.",
+  "- No new outcomes or hypotheses are searched in this patch."
 )
 
 writeLines(
