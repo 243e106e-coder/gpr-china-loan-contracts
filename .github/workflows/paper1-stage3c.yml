@@ -1,0 +1,52 @@
+name: Paper1 Stage3C Robustness
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage3c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::dplyr
+            any::fixest
+            any::broom
+
+      - name: Run Stage 3C
+        run: Rscript R/run_stage3c.R
+
+      - name: Show Stage 3C summary
+        if: always()
+        run: |
+          echo "===== STAGE 3C SUMMARY ====="
+          cat outputs/stage3c_robustness/STAGE3C_SUMMARY.md || true
+          echo "===== STANDARDIZED GPR COEFFICIENTS ====="
+          cat outputs/stage3c_robustness/04_standardized_gpr_coefficients.csv || true
+          echo "===== LOO COUNTRY ====="
+          cat outputs/stage3c_robustness/09_leave_one_country_out_summary.csv || true
+          echo "===== LOO YEAR ====="
+          cat outputs/stage3c_robustness/11_leave_one_year_out_summary.csv || true
+
+      - name: Upload Stage 3C artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage3c-robustness
+          path: outputs/stage3c_robustness/
+          if-no-files-found: warn
+          retention-days: 30
