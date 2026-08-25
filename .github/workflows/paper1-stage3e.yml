@@ -1,0 +1,54 @@
+name: Paper1 Stage3E Legal Choice
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage3e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::dplyr
+            any::stringr
+            any::countrycode
+            any::fixest
+            any::broom
+
+      - name: Run Stage 3E
+        run: Rscript R/run_stage3e.R
+
+      - name: Show Stage 3E summary
+        if: always()
+        run: |
+          echo "===== STAGE 3E SUMMARY ====="
+          cat outputs/stage3e_legal_choice/STAGE3E_SUMMARY.md || true
+          echo "===== GOVERNING LAW ====="
+          cat outputs/stage3e_legal_choice/08_governing_law_gpr_coefficients.csv || true
+          echo "===== ARBITRATION ====="
+          cat outputs/stage3e_legal_choice/10_arbitration_gpr_coefficients.csv || true
+          echo "===== CROSS DEFAULT ====="
+          cat outputs/stage3e_legal_choice/11_cross_default_confirmatory.csv || true
+
+      - name: Upload Stage 3E artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage3e-legal-choice
+          path: outputs/stage3e_legal_choice/
+          if-no-files-found: warn
+          retention-days: 30
