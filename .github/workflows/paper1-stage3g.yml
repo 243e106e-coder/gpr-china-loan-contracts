@@ -1,0 +1,55 @@
+name: Paper1 Stage3G Final Inference
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage3g:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::dplyr
+            any::fixest
+            any::broom
+
+      - name: Try install wild-cluster package
+        continue-on-error: true
+        run: |
+          Rscript -e 'install.packages("fwildclusterboot", repos="https://cloud.r-project.org")'
+
+      - name: Run Stage 3G
+        run: Rscript R/run_stage3g.R
+
+      - name: Show final summary
+        if: always()
+        run: |
+          echo "===== STAGE 3G SUMMARY ====="
+          cat outputs/stage3g_final_inference/STAGE3G_SUMMARY.md || true
+          echo "===== FINAL RESULTS TABLE ====="
+          cat outputs/stage3g_final_inference/12_final_results_table.csv || true
+          echo "===== WILD CLUSTER ====="
+          cat outputs/stage3g_final_inference/06_final_wild_cluster_results.csv || true
+
+      - name: Upload Stage 3G artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage3g-final-inference
+          path: outputs/stage3g_final_inference/
+          if-no-files-found: warn
+          retention-days: 30
