@@ -1,0 +1,54 @@
+name: Paper1 Stage3G Wild Cluster Patch
+
+on:
+  workflow_dispatch:
+
+jobs:
+  wildcluster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup base dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::dplyr
+            any::fixest
+            any::broom
+
+      - name: Install fwildclusterboot from official R-universe
+        run: |
+          Rscript -e 'options(repos=c(s3alfisc="https://s3alfisc.r-universe.dev", CRAN="https://cloud.r-project.org")); install.packages("fwildclusterboot", dependencies=TRUE); stopifnot(requireNamespace("fwildclusterboot", quietly=TRUE)); cat("fwildclusterboot version:", as.character(packageVersion("fwildclusterboot")), "\n")'
+
+      - name: Run only Stage 3G wild-cluster patch
+        run: Rscript R/run_stage3g_wild_patch.R
+
+      - name: Show bootstrap results
+        if: always()
+        run: |
+          echo "===== WILD CLUSTER ====="
+          cat outputs/stage3g_final_inference/06_final_wild_cluster_results.csv || true
+          echo "===== FINAL RESULTS ====="
+          cat outputs/stage3g_final_inference/12_final_results_table.csv || true
+          echo "===== SUMMARY ====="
+          cat outputs/stage3g_final_inference/STAGE3G_SUMMARY.md || true
+
+      - name: Upload bootstrap artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage3g-wild-cluster
+          path: outputs/stage3g_final_inference/
+          if-no-files-found: warn
+          retention-days: 30
