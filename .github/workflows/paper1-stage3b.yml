@@ -1,0 +1,56 @@
+name: Paper1 Stage3B Identification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage3b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::readxl
+            any::dplyr
+            any::tidyr
+            any::stringr
+            any::lubridate
+            any::janitor
+            any::countrycode
+            any::fixest
+            any::broom
+
+      - name: Run Stage 3B
+        run: Rscript R/run_stage3b.R
+
+      - name: Show summary
+        if: always()
+        run: |
+          echo "===== STAGE 3B ====="
+          cat outputs/stage3b_identification/STAGE3B_SUMMARY.md || true
+          echo "===== COUNTRY GPR COVERAGE ====="
+          cat outputs/stage3b_identification/07_country_gpr_merge_coverage.csv || true
+          echo "===== TWFE COEFFICIENTS ====="
+          cat outputs/stage3b_identification/11_country_gpr_twfe_coefficients.csv || true
+
+      - name: Upload Stage 3B artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage3b-identification
+          path: outputs/stage3b_identification/
+          if-no-files-found: warn
+          retention-days: 30
