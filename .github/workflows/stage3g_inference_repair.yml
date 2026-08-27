@@ -1,0 +1,79 @@
+name: Paper 1 Stage 3G Inference Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      financial_data:
+        description: "Path to 01_financial_final_data CSV"
+        required: true
+        default: "01_financial_final_data.csv"
+        type: string
+      legal_data:
+        description: "Path to 02_legal_final_data CSV"
+        required: true
+        default: "02_legal_final_data.csv"
+        type: string
+
+jobs:
+  stage3g-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Install packages
+        shell: Rscript {0}
+        run: |
+          pkgs <- c("fixest", "fwildclusterboot", "dqrng")
+          miss <- pkgs[!vapply(pkgs, requireNamespace, quietly = TRUE,
+                              FUN.VALUE = logical(1))]
+          if (length(miss)) install.packages(miss)
+
+      - name: Check inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${{ inputs.financial_data }}" || {
+            echo "Missing financial data: ${{ inputs.financial_data }}"
+            find . -type f -name "01_financial_final_data*.csv" -print
+            exit 1
+          }
+          test -f "${{ inputs.legal_data }}" || {
+            echo "Missing legal data: ${{ inputs.legal_data }}"
+            find . -type f -name "02_legal_final_data*.csv" -print
+            exit 1
+          }
+          test -f "stage3g_final_inference_repair.R" || {
+            echo "Missing stage3g_final_inference_repair.R"
+            find . -type f -name "*stage3g*repair*.R" -print
+            exit 1
+          }
+
+      - name: Run Stage 3G repair
+        shell: bash
+        env:
+          FINANCIAL_DATA: ${{ inputs.financial_data }}
+          LEGAL_DATA: ${{ inputs.legal_data }}
+          STAGE3G_REPAIR_OUT: stage3g_inference_repair
+          WILD_B: "9999"
+          WILD_SEED: "20260828"
+        run: |
+          set -euo pipefail
+          Rscript --vanilla stage3g_final_inference_repair.R
+
+      - name: Upload repaired outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3g-inference-repair-${{ github.run_id }}
+          path: stage3g_inference_repair/
+          if-no-files-found: warn
+          retention-days: 30
