@@ -10,59 +10,89 @@ suppressPackageStartupMessages({
 
 # ============================================================
 # Paper 1 — Stage 1.5 substantive field audit
-# Purpose:
-#   1) audit actual value distributions of legal/contract fields;
-#   2) distinguish "non-missing column" from substantive coverage;
-#   3) locate signing-date / maturity / grace-period candidates;
-#   4) explicitly flag penalty interest as NOT ordinary pricing.
-#
-# This script does NOT estimate regressions.
+# Robust HCL workbook discovery for GitHub Actions / local runs.
 # ============================================================
 
 outdir <- "outputs/stage1_5_substantive_audit"
 dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
 
-# ---------- Locate HCL 2.0 workbook ----------
-candidate_paths <- c(
-  "data/How_China_Lends_Dataset_Version_2_0.xlsx",
-  "How_China_Lends_Dataset_Version_2_0.xlsx",
-  "inputs/How_China_Lends_Dataset_Version_2_0.xlsx"
-)
-hcl_path <- candidate_paths[file.exists(candidate_paths)][1]
-
-if (is.na(hcl_path)) {
-  # Recursive fallback for GitHub Actions / local repo
-  hits <- list.files(
-    ".",
-    pattern = "How_China_Lends_Dataset_Version_2_0\\.xlsx$",
-    recursive = TRUE,
-    full.names = TRUE
+find_hcl_workbook <- function() {
+  preferred <- c(
+    "data/How_China_Lends_Dataset_Version_2_0.xlsx",
+    "How_China_Lends_Dataset_Version_2_0.xlsx",
+    "inputs/How_China_Lends_Dataset_Version_2_0.xlsx"
   )
-  if (!length(hits)) {
-    stop("Could not locate How_China_Lends_Dataset_Version_2_0.xlsx", call. = FALSE)
+  preferred <- preferred[file.exists(preferred)]
+  if (length(preferred)) return(preferred[1])
+
+  search_roots <- c(
+    "data/raw/hcl2/unzipped",
+    "data/raw/hcl2",
+    "data",
+    "inputs",
+    "."
+  )
+
+  candidates <- character()
+  for (root in search_roots) {
+    if (!dir.exists(root)) next
+    hits <- list.files(
+      root,
+      pattern = "\\.xlsx$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+    candidates <- unique(c(candidates, hits))
   }
-  hcl_path <- hits[1]
+
+  if (!length(candidates)) return(NA_character_)
+
+  # Prefer files whose names clearly refer to How China Lends / HCL.
+  scored <- tibble(path = candidates) %>%
+    mutate(
+      fname = basename(path),
+      score =
+        10L * str_detect(fname, regex("How.*China.*Lends", ignore_case = TRUE)) +
+         5L * str_detect(fname, regex("HCL", ignore_case = TRUE)) +
+         3L * str_detect(fname, regex("Dataset.*Version.*2", ignore_case = TRUE)) +
+         1L * str_detect(path, regex("data/raw/hcl2/unzipped", ignore_case = TRUE))
+    ) %>%
+    arrange(desc(score), path)
+
+  # Verify the workbook actually contains ContractData.
+  for (p in scored$path) {
+    sh <- tryCatch(excel_sheets(p), error = function(e) character())
+    if ("ContractData" %in% sh) return(p)
+  }
+
+  NA_character_
+}
+
+hcl_path <- find_hcl_workbook()
+if (is.na(hcl_path)) {
+  stop(
+    paste0(
+      "Could not locate an HCL 2.0 workbook containing sheet 'ContractData'. ",
+      "Expected R/01_download_data.R to have downloaded and unzipped HCL under ",
+      "data/raw/hcl2/unzipped/."
+    ),
+    call. = FALSE
+  )
 }
 
 message("Using HCL workbook: ", hcl_path)
-
-sheets <- excel_sheets(hcl_path)
-if (!("ContractData" %in% sheets)) {
-  stop("ContractData sheet not found in HCL workbook.", call. = FALSE)
-}
 
 raw <- read_excel(hcl_path, sheet = "ContractData")
 orig_names <- names(raw)
 dat <- raw %>% clean_names()
 
-# Preserve original-to-clean mapping
 name_map <- tibble(
   column_original = orig_names,
   column_clean = names(dat)
 )
 write_csv(name_map, file.path(outdir, "00_column_name_map.csv"))
 
-# ---------- Helpers ----------
 normalize_chr <- function(x) {
   y <- as.character(x)
   y <- str_squish(y)
@@ -73,26 +103,18 @@ normalize_chr <- function(x) {
 distribution_table <- function(df, col) {
   x <- normalize_chr(df[[col]])
   tibble(value = x) %>%
-    mutate(
-      value_display = if_else(is.na(value), "<MISSING>", value)
-    ) %>%
+    mutate(value_display = if_else(is.na(value), "<MISSING>", value)) %>%
     count(value_display, sort = TRUE, name = "n") %>%
-    mutate(
-      column = col,
-      pct = n / sum(n)
-    ) %>%
+    mutate(column = col, pct = n / sum(n)) %>%
     select(column, value = value_display, n, pct)
 }
 
 coverage_row <- function(df, col) {
   x <- normalize_chr(df[[col]])
-  tab <- table(x, useNA = "ifany")
   n <- length(x)
   n_nonmissing <- sum(!is.na(x))
   n_unique_nonmissing <- n_distinct(x[!is.na(x)])
 
-  # Conservative indicators of explicitly negative / absent values.
-  # These are diagnostic only and are NOT recoded into final binaries here.
   neg_regex <- regex(
     "^(0|no|none|false|not applicable|n/?a|absent|no provision|not specified)$",
     ignore_case = TRUE
@@ -111,7 +133,6 @@ coverage_row <- function(df, col) {
   )
 }
 
-# ---------- 1. Core substantive legal-field audit ----------
 legal_fields_requested <- c(
   "collateral",
   "guarantor",
@@ -140,7 +161,6 @@ write_csv(coverage, file.path(outdir, "01_substantive_field_coverage.csv"))
 dist_all <- map_dfr(legal_fields, ~ distribution_table(dat, .x))
 write_csv(dist_all, file.path(outdir, "02_substantive_field_value_distributions.csv"))
 
-# Separate distributions for the most important legal margins
 for (cc in legal_fields) {
   write_csv(
     distribution_table(dat, cc),
@@ -148,15 +168,20 @@ for (cc in legal_fields) {
   )
 }
 
-# ---------- 2. Search all columns for date / maturity / grace / pricing candidates ----------
 all_cols <- names(dat)
 
 candidate_patterns <- list(
-  signing_date = c("sign", "signature", "signed", "agreement_date", "contract_date", "approval_date", "commitment_date", "date"),
+  signing_date = c(
+    "sign", "signature", "signed", "agreement_date", "contract_date",
+    "approval_date", "commitment_date", "date"
+  ),
   year = c("^year$", "signing_year", "contract_year", "approval_year"),
   maturity = c("maturity", "matur", "tenor", "term", "duration"),
   grace = c("grace", "grace_period"),
-  pricing = c("interest", "spread", "margin", "pricing", "coupon", "rate", "libor", "sofr", "euribor")
+  pricing = c(
+    "interest", "spread", "margin", "pricing", "coupon", "rate",
+    "libor", "sofr", "euribor"
+  )
 )
 
 candidate_hits <- imap_dfr(candidate_patterns, function(patterns, role) {
@@ -170,9 +195,11 @@ candidate_hits <- imap_dfr(candidate_patterns, function(patterns, role) {
   left_join(name_map, by = "column_clean") %>%
   select(role, column_original, column_clean)
 
-write_csv(candidate_hits, file.path(outdir, "03_date_maturity_grace_pricing_candidates.csv"))
+write_csv(
+  candidate_hits,
+  file.path(outdir, "03_date_maturity_grace_pricing_candidates.csv")
+)
 
-# Add coverage + first values for every candidate
 candidate_profile <- candidate_hits %>%
   filter(!is.na(column_clean)) %>%
   mutate(profile = map(column_clean, function(cc) {
@@ -191,7 +218,6 @@ candidate_profile <- candidate_hits %>%
 
 write_csv(candidate_profile, file.path(outdir, "04_candidate_profiles.csv"))
 
-# ---------- 3. Explicit pricing safety audit ----------
 pricing_candidates <- candidate_hits %>%
   filter(role == "pricing", !is.na(column_clean))
 
@@ -214,12 +240,10 @@ pricing_safety <- pricing_candidates %>%
 
 write_csv(pricing_safety, file.path(outdir, "05_pricing_safety_audit.csv"))
 
-# Hard assertion: never silently treat penalty interest as ordinary price.
 if ("penalty_interest_rate" %in% names(dat)) {
   message("SAFETY: penalty_interest_rate exists but is explicitly excluded from ordinary pricing.")
 }
 
-# ---------- 4. Key identifiers / country / creditor audit ----------
 id_fields <- intersect(
   c(
     "contract_id",
@@ -240,7 +264,6 @@ id_fields <- intersect(
 id_coverage <- map_dfr(id_fields, ~ coverage_row(dat, .x))
 write_csv(id_coverage, file.path(outdir, "06_key_identifier_coverage.csv"))
 
-# ---------- 5. Governing-law and arbitration substantive summaries ----------
 if ("governing_law" %in% names(dat)) {
   write_csv(
     distribution_table(dat, "governing_law"),
@@ -266,7 +289,6 @@ if ("arbitration_des" %in% names(dat)) {
   )
 }
 
-# ---------- 6. Machine-readable mapping recommendation ----------
 mapping <- tibble(
   research_concept = c(
     "Borrower country",
@@ -304,7 +326,7 @@ mapping <- tibble(
     ifelse("arbitration" %in% names(dat), "arbitration", NA),
     ifelse("arbitration_des" %in% names(dat), "arbitration_des", NA),
     NA_character_,
-    ifelse("year" %in% names(dat), "year (only if verified as contract/signing year)", NA),
+    ifelse("year" %in% names(dat), "year (verify definition)", NA),
     NA_character_,
     NA_character_
   ),
@@ -318,7 +340,7 @@ mapping <- tibble(
   note = c(
     rep("Inspect distributions before final recoding.", 14),
     "Penalty interest must not be used as the normal lending rate/spread.",
-    "HCL ContractData contains a 'year' field; verify what event the year represents.",
+    "Verify what event the HCL year field represents.",
     "If not present in HCL ContractData, retain the already harmonized external/source variable and document provenance.",
     "If not present in HCL ContractData, retain the already harmonized external/source variable and document provenance."
   )
@@ -326,7 +348,6 @@ mapping <- tibble(
 
 write_csv(mapping, file.path(outdir, "11_recommended_field_mapping.csv"))
 
-# ---------- 7. Human-readable summary ----------
 top_value_text <- function(col, k = 5) {
   if (!(col %in% names(dat))) return("not present")
   tab <- distribution_table(dat, col) %>% slice_head(n = k)
@@ -347,14 +368,34 @@ summary_lines <- c(
   "- No regression is estimated in this stage.",
   "",
   "## Candidate search",
-  paste0("- Signing/date candidates: ",
-         paste(na.omit(candidate_hits$column_clean[candidate_hits$role == "signing_date"]), collapse = ", ")),
-  paste0("- Maturity candidates: ",
-         paste(na.omit(candidate_hits$column_clean[candidate_hits$role == "maturity"]), collapse = ", ")),
-  paste0("- Grace candidates: ",
-         paste(na.omit(candidate_hits$column_clean[candidate_hits$role == "grace"]), collapse = ", ")),
-  paste0("- Pricing-name candidates: ",
-         paste(na.omit(candidate_hits$column_clean[candidate_hits$role == "pricing"]), collapse = ", ")),
+  paste0(
+    "- Signing/date candidates: ",
+    paste(
+      na.omit(candidate_hits$column_clean[candidate_hits$role == "signing_date"]),
+      collapse = ", "
+    )
+  ),
+  paste0(
+    "- Maturity candidates: ",
+    paste(
+      na.omit(candidate_hits$column_clean[candidate_hits$role == "maturity"]),
+      collapse = ", "
+    )
+  ),
+  paste0(
+    "- Grace candidates: ",
+    paste(
+      na.omit(candidate_hits$column_clean[candidate_hits$role == "grace"]),
+      collapse = ", "
+    )
+  ),
+  paste0(
+    "- Pricing-name candidates: ",
+    paste(
+      na.omit(candidate_hits$column_clean[candidate_hits$role == "pricing"]),
+      collapse = ", "
+    )
+  ),
   "",
   "## Selected legal field snapshots",
   paste0("- collateral: ", top_value_text("collateral")),
