@@ -24,13 +24,31 @@ jobs:
           packages: |
             any::readr
             any::readxl
+            any::haven
             any::dplyr
-            any::tidyr
-            any::stringr
             any::purrr
+            any::stringr
+            any::tidyr
             any::janitor
 
-      - name: Check script
+      - name: Prepare data and output directories
+        run: |
+          mkdir -p data/raw/hcl2
+          mkdir -p data/raw/gpr
+          mkdir -p outputs/stage1_audit
+          mkdir -p outputs/stage1_5_substantive_audit
+
+      - name: Download HCL 2.0 and GPR source files
+        run: Rscript R/01_download_data.R
+
+      - name: Locate downloaded HCL workbook
+        run: |
+          echo "===== HCL FILES ====="
+          find data/raw/hcl2 -maxdepth 5 -type f -print | sort
+          echo "===== XLSX FILES ====="
+          find data/raw/hcl2 -type f -iname "*.xlsx" -print | sort
+
+      - name: Check Stage 1.5 script
         run: |
           test -f R/21_stage1_5_substantive_field_audit.R
           echo "Stage 1.5 substantive audit script found."
@@ -49,6 +67,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: paper1-stage1-5-substantive-audit
-          path: outputs/stage1_5_substantive_audit/
+          path: |
+            outputs/stage1_5_substantive_audit/
+            outputs/stage1_audit/download_status.csv
           if-no-files-found: warn
           retention-days: 30
