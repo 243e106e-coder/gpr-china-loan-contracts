@@ -153,10 +153,18 @@ residualized_gpr_country_share <- function(dd, g, controls, hid) {
   )
 
   m_g <- feols(f_g, data = dd, fixef.rm = "none")
-  r_g <- resid(m_g)
 
+  # Do not attach resid(m_g) by position.  fixest may remove/reorder rows in
+  # the estimation sample; positional recycling silently makes every country
+  # appear to have the same FWL share.  Predict on the original diagnostic
+  # sample so each residual is explicitly aligned to its contract row.
+  g_hat <- as.numeric(predict(m_g, newdata = dd))
   tmp <- dd %>%
-    mutate(.g_resid = as.numeric(r_g))
+    mutate(.g_resid = .data[[g]] - g_hat)
+
+  if (any(!is.finite(tmp$.g_resid))) {
+    stop("FWL residualization produced non-finite fitted values.", call. = FALSE)
+  }
 
   denom <- sum(tmp$.g_resid^2, na.rm = TRUE)
 
@@ -178,7 +186,52 @@ residualized_gpr_country_share <- function(dd, g, controls, hid) {
       )
     ) %>%
     rename(country = all_of(country_var)) %>%
-    arrange(desc(residualized_gpr_share))
+    arrange(desc(residualized_gpr_share)) %>%
+    {
+      if (!isTRUE(all.equal(sum(.$residualized_gpr_share), 1, tolerance = 1e-8))) {
+        stop("Country FWL shares do not sum to one.", call. = FALSE)
+      }
+      .
+    }
+}
+
+country_mechanism_audit <- function(dd, y, g, hid, inf, fwl_share) {
+  influence <- inf %>%
+    transmute(
+      country = omitted_country,
+      leave_one_beta = beta,
+      leave_one_p = clustered_p,
+      abs_dfbeta_like,
+      sign_same
+    )
+
+  dd %>%
+    group_by(.data[[country_var]]) %>%
+    summarise(
+      n_contracts = n(),
+      n_years = n_distinct(.data[[year_var]]),
+      first_year = min(.data[[year_var]], na.rm = TRUE),
+      last_year = max(.data[[year_var]], na.rm = TRUE),
+      gpr_mean = mean(.data[[g]], na.rm = TRUE),
+      gpr_sd = sd(.data[[g]], na.rm = TRUE),
+      outcome_mean = mean(.data[[y]], na.rm = TRUE),
+      outcome_sd = sd(.data[[y]], na.rm = TRUE),
+      mean_log_loan_amount = if ("log_loan_amount" %in% names(dd)) mean(log_loan_amount, na.rm = TRUE) else NA_real_,
+      policy_bank_share = if ("creditor_type" %in% names(dd)) mean(grepl("Policy Bank", creditor_type, fixed = TRUE), na.rm = TRUE) else NA_real_,
+      .groups = "drop"
+    ) %>%
+    rename(country = all_of(country_var)) %>%
+    left_join(influence, by = "country") %>%
+    left_join(
+      fwl_share %>% select(country, residualized_gpr_share, residualized_gpr_ss),
+      by = "country"
+    ) %>%
+    mutate(
+      hypothesis_id = hid,
+      high_influence = abs_dfbeta_like >= 1,
+      high_fwl_share = residualized_gpr_share >= 0.25
+    ) %>%
+    arrange(desc(abs_dfbeta_like))
 }
 
 country_year_profile <- function(dd, y, g, hid) {
@@ -371,6 +424,7 @@ all_cy <- list()
 all_extreme <- list()
 all_leave2 <- list()
 all_winsor <- list()
+all_mechanism <- list()
 all_focus_country_year <- list()
 
 for (i in seq_len(nrow(targets))) {
@@ -415,6 +469,7 @@ for (i in seq_len(nrow(targets))) {
   )
 
   wins <- winsor_sensitivity(dd, y, g, comp$controls, hid)
+  mechanism <- country_mechanism_audit(dd, y, g, hid, inf, fwl_share)
 
   top_country <- if (nrow(inf)) inf$omitted_country[1] else NA_character_
   top_fwl_country <- if (nrow(fwl_share)) fwl_share$country[1] else NA_character_
@@ -473,6 +528,7 @@ for (i in seq_len(nrow(targets))) {
   all_extreme[[hid]] <- extreme
   all_leave2[[hid]] <- leave2
   all_winsor[[hid]] <- wins
+  all_mechanism[[hid]] <- mechanism
   all_focus_country_year[[hid]] <- focus_cy
 
   write_csv(
@@ -482,6 +538,10 @@ for (i in seq_len(nrow(targets))) {
   write_csv(
     fwl_share,
     file.path(out_dir, paste0(hid, "_residualized_gpr_country_share.csv"))
+  )
+  write_csv(
+    mechanism,
+    file.path(out_dir, paste0(hid, "_country_mechanism_audit.csv"))
   )
   write_csv(
     focus_cy,
@@ -538,6 +598,7 @@ cy_df <- bind_rows(all_cy)
 extreme_df <- bind_rows(all_extreme)
 leave2_df <- bind_rows(all_leave2)
 winsor_df <- bind_rows(all_winsor)
+mechanism_df <- bind_rows(all_mechanism)
 focus_cy_df <- bind_rows(all_focus_country_year)
 
 write_csv(main_df,       file.path(out_dir, "00_stage3i_diagnostic_summary.csv"))
@@ -547,6 +608,7 @@ write_csv(cy_df,         file.path(out_dir, "03_all_country_year_profiles.csv"))
 write_csv(extreme_df,    file.path(out_dir, "04_top_extreme_observations.csv"))
 write_csv(winsor_df,     file.path(out_dir, "05_winsor_sensitivity.csv"))
 write_csv(focus_cy_df,   file.path(out_dir, "06_focus_country_year_profiles.csv"))
+write_csv(mechanism_df,  file.path(out_dir, "09_country_mechanism_audit.csv"))
 if (nrow(leave2_df)) {
   write_csv(leave2_df, file.path(out_dir, "07_leave_two_out.csv"))
 }
