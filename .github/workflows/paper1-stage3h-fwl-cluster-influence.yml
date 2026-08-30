@@ -29,35 +29,140 @@ jobs:
             any::purrr
             any::fixest
             any::broom
+            any::ggplot2
 
       - name: Check FWL audit script
         run: |
+          set -euo pipefail
+
           test -f R/58_fwl_cluster_influence_audit.R
+
           echo "FWL cluster influence script found."
           echo "===== SCRIPT HEADER ====="
           head -n 15 R/58_fwl_cluster_influence_audit.R
 
-      - name: Check master dataset
+      - name: Check Stage 3G inputs
         run: |
-          echo "===== MASTER DATASET CANDIDATES ====="
-          find outputs -type f -name "09_stage2b_master_dataset.csv" -print || true
+          set -euo pipefail
+
+          OUTDIR="outputs/stage3g_final_inference"
+
+          echo "===== STAGE 3G INPUT CHECK ====="
+
+          required_files=(
+            "$OUTDIR/01_financial_final_data.csv"
+            "$OUTDIR/02_legal_final_data.csv"
+            "$OUTDIR/03_final_hypotheses.csv"
+            "$OUTDIR/04_final_clustered_results.csv"
+          )
+
+          for f in "${required_files[@]}"; do
+            if [ -f "$f" ]; then
+              echo "FOUND: $f"
+            else
+              echo "MISSING: $f"
+              exit 1
+            fi
+          done
+
+      - name: Check installed R packages
+        run: |
+          Rscript -e '
+          pkgs <- c(
+            "readr",
+            "dplyr",
+            "tidyr",
+            "fixest",
+            "ggplot2"
+          )
+
+          for (p in pkgs) {
+            cat(
+              p,
+              ": ",
+              requireNamespace(p, quietly = TRUE),
+              "\n",
+              sep = ""
+            )
+          }
+
+          missing <- pkgs[
+            !vapply(
+              pkgs,
+              requireNamespace,
+              quietly = TRUE,
+              FUN.VALUE = logical(1)
+            )
+          ]
+
+          if (length(missing) > 0) {
+            stop(
+              paste(
+                "Missing R packages:",
+                paste(missing, collapse = ", ")
+              )
+            )
+          }
+          '
 
       - name: Run FWL cluster influence audit
-        run: Rscript R/58_fwl_cluster_influence_audit.R
+        run: |
+          set -euo pipefail
+          Rscript R/58_fwl_cluster_influence_audit.R
 
-      - name: Show summary
+      - name: Verify Stage 3H outputs
+        run: |
+          set -euo pipefail
+
+          AUDIT_DIR="outputs/stage3g_final_inference/cluster_influence_gpr_audit"
+
+          echo "===== GENERATED FILES ====="
+          find "$AUDIT_DIR" -maxdepth 1 -type f -print | sort
+
+          required_outputs=(
+            "$AUDIT_DIR/00_cluster_influence_summary.csv"
+            "$AUDIT_DIR/01_all_country_gpr_variation.csv"
+            "$AUDIT_DIR/02_all_year_gpr_variation.csv"
+            "$AUDIT_DIR/03_all_leave_one_country_influence.csv"
+            "$AUDIT_DIR/04_all_leave_one_year_influence.csv"
+          )
+
+          for f in "${required_outputs[@]}"; do
+            if [ -f "$f" ]; then
+              echo "FOUND: $f"
+            else
+              echo "MISSING OUTPUT: $f"
+              exit 1
+            fi
+          done
+
+      - name: Show cluster influence summary
         if: always()
         run: |
-          echo "===== STAGE 3H SUMMARY ====="
-          cat outputs/stage3h_cluster_influence/STAGE3H_SUMMARY.md || true
-          echo "===== FWL CONCENTRATION ====="
-          cat outputs/stage3h_cluster_influence/01_fwl_concentration_summary.csv || true
+          AUDIT_DIR="outputs/stage3g_final_inference/cluster_influence_gpr_audit"
+
+          echo "===== CLUSTER INFLUENCE SUMMARY ====="
+
+          if [ -f "$AUDIT_DIR/00_cluster_influence_summary.csv" ]; then
+            cat "$AUDIT_DIR/00_cluster_influence_summary.csv"
+          else
+            echo "00_cluster_influence_summary.csv not generated."
+          fi
+
+          echo ""
+          echo "===== OUTPUT FILE LIST ====="
+
+          if [ -d "$AUDIT_DIR" ]; then
+            find "$AUDIT_DIR" -maxdepth 1 -type f -print | sort
+          else
+            echo "Audit output directory not generated."
+          fi
 
       - name: Upload Stage 3H artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: paper1-stage3h-fwl-cluster-influence
-          path: outputs/stage3h_cluster_influence/
+          path: outputs/stage3g_final_inference/cluster_influence_gpr_audit/
           if-no-files-found: warn
           retention-days: 30
