@@ -196,7 +196,7 @@ residualized_gpr_country_share <- function(dd, g, controls, hid) {
       fwl_country_ss_total = country_denom,
       fwl_accounting_gap = country_denom - denom,
       fwl_share_sum = sum(residualized_gpr_share, na.rm = TRUE),
-      fwl_accounting_ok = abs(fwl_accounting_gap) < 1e-8 &&
+      fwl_accounting_ok = abs(fwl_accounting_gap) < 1e-8 &
         abs(fwl_share_sum - 1) < 1e-8
     ) %>%
     arrange(desc(residualized_gpr_share))
