@@ -499,7 +499,7 @@ for (i in seq_len(nrow(targets))) {
   }
 
   p1 <- ggplot(
-    fwl_share %>% slice_head(n = min(15, n())),
+    fwl_share %>% slice_head(n = 15),
     aes(x = reorder(country, residualized_gpr_share), y = residualized_gpr_share)
   ) +
     geom_col() +
@@ -515,7 +515,7 @@ for (i in seq_len(nrow(targets))) {
   )
 
   p2 <- ggplot(
-    inf %>% slice_head(n = min(15, n())),
+    inf %>% slice_head(n = 15),
     aes(x = reorder(omitted_country, abs_dfbeta_like), y = abs_dfbeta_like)
   ) +
     geom_col() +
