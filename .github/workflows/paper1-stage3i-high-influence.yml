@@ -1,0 +1,115 @@
+name: Paper1 Stage3I High Influence Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  stage3i-high-influence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4.2"
+          use-public-rspm: true
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::readr
+            any::dplyr
+            any::tidyr
+            any::stringr
+            any::purrr
+            any::fixest
+            any::ggplot2
+
+      - name: Locate latest successful Stage 3G run
+        id: stage3g
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUN_ID="$(
+            gh run list \
+              --workflow paper1-stage3g.yml \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId'
+          )"
+
+          if [ -z "${RUN_ID:-}" ] || [ "$RUN_ID" = "null" ]; then
+            echo "No successful Stage 3G run found."
+            exit 1
+          fi
+
+          echo "Stage 3G run: $RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Stage 3G artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.stage3g.outputs.run_id }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p outputs/stage3g_final_inference
+
+          gh run download "$RUN_ID" \
+            --name paper1-stage3g-final-inference \
+            --dir outputs/stage3g_final_inference
+
+          echo "===== DOWNLOADED STAGE 3G FILES ====="
+          find outputs/stage3g_final_inference -maxdepth 2 -type f -print | sort
+
+      - name: Check Stage 3I script and required inputs
+        run: |
+          set -euo pipefail
+
+          test -f R/59_high_influence_diagnostic.R
+          test -f outputs/stage3g_final_inference/01_financial_final_data.csv
+          test -f outputs/stage3g_final_inference/02_legal_final_data.csv
+          test -f outputs/stage3g_final_inference/03_final_hypotheses.csv
+          test -f outputs/stage3g_final_inference/04_final_clustered_results.csv
+
+          echo "Stage 3I script and Stage 3G inputs found."
+
+      - name: Run Stage 3I diagnostic
+        run: |
+          set -euo pipefail
+          Rscript R/59_high_influence_diagnostic.R
+
+      - name: Show Stage 3I summary
+        if: always()
+        run: |
+          echo "===== STAGE 3I SUMMARY ====="
+          cat outputs/stage3i_high_influence_diagnostic/STAGE3I_SUMMARY.md || true
+
+          echo ""
+          echo "===== DIAGNOSTIC FLAGS ====="
+          cat outputs/stage3i_high_influence_diagnostic/08_diagnostic_flags.csv || true
+
+          echo ""
+          echo "===== OUTPUT FILES ====="
+          find outputs/stage3i_high_influence_diagnostic -maxdepth 1 -type f -print | sort || true
+
+      - name: Upload Stage 3I artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-stage3i-high-influence-diagnostic
+          path: outputs/stage3i_high_influence_diagnostic/
+          if-no-files-found: warn
+          retention-days: 30
