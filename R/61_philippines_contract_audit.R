@@ -1,0 +1,38 @@
+suppressPackageStartupMessages({library(readr); library(dplyr); library(tidyr); library(stringr)})
+base_dir <- "outputs/stage3g_final_inference"
+out_dir <- "outputs/stage3k_philippines_contract_audit"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+country_var <- "borrower_country_final"; year_var <- "year"; focus_country <- "Philippines"
+req <- file.path(base_dir, c("02_legal_final_data.csv", "03_final_hypotheses.csv"))
+if (any(!file.exists(req))) stop("Missing Stage 3G input(s): ", paste(req[!file.exists(req)], collapse = ", "), call. = FALSE)
+legal <- read_csv(req[1], show_col_types = FALSE)
+targets <- read_csv(req[2], show_col_types = FALSE) %>% filter(hypothesis_id %in% c("L3", "L4"))
+if (nrow(targets) != 2) stop("L3 and L4 are required in the Stage 3G hypothesis table.", call. = FALSE)
+pick_col <- function(candidates, names_available) { z <- intersect(candidates, names_available); if(length(z)) z[1] else NA_character_ }
+creditor_id <- pick_col(c("creditor_name_final", "creditor_name", "creditor", "lender_name", "lender"), names(legal))
+project_id <- pick_col(c("project_name", "project", "project_title", "purpose", "sector"), names(legal))
+contract_id <- pick_col(c("contract_id", "loan_id", "id", "uid", "record_id"), names(legal))
+controls_for <- function(d) unique(c(intersect(c("log_loan_amount", "creditor_type"), names(d)), intersect(c("maturity_years", "grace_period_years"), names(d))))
+controls <- controls_for(legal)
+outcomes <- setNames(targets$outcome, targets$hypothesis_id)
+gpr <- targets$gpr_measure[1]
+has_log_loan_amount <- "log_loan_amount" %in% names(legal)
+needed <- unique(c("main_sample", country_var, year_var, outcomes, gpr, controls))
+sample <- legal %>% filter(main_sample == 1) %>% filter(if_all(all_of(needed), ~ !is.na(.x)))
+focus <- sample %>% filter(.data[[country_var]] == focus_country)
+if (!nrow(focus)) stop("No Philippines observations in the exact L3/L4 estimation sample.", call. = FALSE)
+id_cols <- unique(na.omit(c(contract_id, creditor_id, project_id, "creditor_type", "log_loan_amount", "maturity_years", "grace_period_years")))
+contract_audit <- focus %>% mutate(row_in_exact_sample = row_number()) %>% select(any_of(c(id_cols, country_var, year_var, gpr, outcomes, "row_in_exact_sample")), everything())
+year_profile <- sample %>% mutate(country_group = if_else(.data[[country_var]] == focus_country, focus_country, "All other countries")) %>% group_by(country_group, .data[[year_var]]) %>% summarise(n_contracts=n(), gpr_mean=mean(.data[[gpr]]), mainland_share=mean(.data[[outcomes[["L3"]]]]), third_country_share=mean(.data[[outcomes[["L4"]]]]), mean_log_loan_amount=if(has_log_loan_amount) mean(log_loan_amount) else NA_real_, .groups="drop") %>% rename(year=all_of(year_var))
+make_group_profile <- function(x, col, label) { if(is.na(col)) return(tibble(group_variable=label, group_value=NA_character_, n_contracts=NA_integer_, contract_share=NA_real_, first_year=NA_real_, last_year=NA_real_, mainland_share=NA_real_, third_country_share=NA_real_)); x %>% mutate(.group=as.character(.data[[col]]), .group=if_else(is.na(.group)|.group=="", "<missing>", .group)) %>% group_by(.group) %>% summarise(n_contracts=n(), contract_share=n()/nrow(x), first_year=min(.data[[year_var]]), last_year=max(.data[[year_var]]), mainland_share=mean(.data[[outcomes[["L3"]]]]), third_country_share=mean(.data[[outcomes[["L4"]]]]), .groups="drop") %>% transmute(group_variable=label, group_value=.group, everything()) %>% arrange(desc(n_contracts), group_value) }
+concentration <- bind_rows(make_group_profile(focus, creditor_id, ifelse(is.na(creditor_id), "creditor_unavailable", creditor_id)), make_group_profile(focus, project_id, ifelse(is.na(project_id), "project_unavailable", project_id)))
+metrics <- concentration %>% filter(!is.na(contract_share)) %>% group_by(group_variable) %>% summarise(n_groups=n(), top_group=group_value[which.max(n_contracts)], top_group_contracts=max(n_contracts), top_group_share=max(contract_share), hhi=sum(contract_share^2), .groups="drop")
+event_window <- focus %>% count(.data[[year_var]], .data[[outcomes[["L3"]]]], .data[[outcomes[["L4"]]]], name="n_contracts") %>% rename(year=all_of(year_var), arb_mainland_china=all_of(outcomes[["L3"]]), arb_international_third=all_of(outcomes[["L4"]])) %>% arrange(year, desc(n_contracts))
+write_csv(contract_audit, file.path(out_dir, "01_philippines_contract_level_audit.csv"))
+write_csv(year_profile, file.path(out_dir, "02_philippines_vs_other_countries_by_year.csv"))
+write_csv(concentration, file.path(out_dir, "03_philippines_creditor_project_concentration.csv"))
+write_csv(metrics, file.path(out_dir, "04_philippines_concentration_metrics.csv"))
+write_csv(event_window, file.path(out_dir, "05_philippines_year_outcome_cells.csv"))
+md <- c("# Stage 3K Philippines Contract Audit", "", paste0("Exact L3/L4 estimation sample: ", nrow(sample), " contracts; Philippines: ", nrow(focus), " contracts."), paste0("Years covered by Philippines: ", min(focus[[year_var]]), "–", max(focus[[year_var]]), "."), "", "## Interpretation", "", "- A mechanism claim requires Philippine contracts to span more than one year and not be dominated by one creditor/project.", "- The concentration table is descriptive. It must be paired with documented, pre-specified bilateral-risk events before making a causal or mechanism claim.", "", "## Concentration", "")
+for(i in seq_len(nrow(metrics))) md <- c(md, paste0("- ", metrics$group_variable[i], ": top group=", metrics$top_group[i], "; share=", round(100*metrics$top_group_share[i],1), "% ; HHI=", round(metrics$hhi[i],3)))
+writeLines(md, file.path(out_dir, "STAGE3K_SUMMARY.md")); cat(paste(md, collapse="\n"), "\n")
